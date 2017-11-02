@@ -1,7 +1,7 @@
 import numpy as np
 import networkx as nx
 import random
-
+import torch
 
 class Graph():
 	def __init__(self, nx_G, is_directed, p, q):

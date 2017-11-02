@@ -14,6 +14,11 @@ import numpy as np
 import networkx as nx
 import node2vec
 from gensim.models import Word2Vec
+import torch
+import torch.autograd as autograd
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 
 def parse_args():
 	'''
@@ -86,8 +91,53 @@ def learn_embeddings(walks):
 	walks = [map(str, walk) for walk in walks]
 	model = Word2Vec(walks, size=args.dimensions, window=args.window_size, min_count=0, sg=1, workers=args.workers, iter=args.iter)
 	model.save_word2vec_format(args.output)
-	
 	return
+
+class Node2Vec(nn.Module):
+    def __init__(self, NODE_SIZE, CONTEXT_SIZE, EMBEDDING_SIZE):
+        super(Node2Vec, self).__init__()
+        self.embeddings = nn.Embedding(NODE_SIZE, EMBEDDING_SIZE)
+        self.linear1 = nn.Linear(CONTEXT_SIZE * EMBEDDING_SIZE, 128)
+        self.linear2 = nn.Linear(128, NODE_SIZE)
+		self.classif1 = nn.Linear(EMBEDDING_SIZE, 64)
+		self.classif2 = nn.Linear(64, 1)
+
+    def forward(self, inputs):
+        embeds = self.embeddings(inputs[:-1]).view((1, -1))
+		clas_embed = self.embeddings(inputs[-1]).view((1,-1))
+        out = F.relu(self.linear1(embeds))
+        out = self.linear2(out)
+        log_probs = F.log_softmax(out)
+		out = F.relu(self.classif1(clas_embed))
+		out = self.classif2(out)
+		clas_log_probs = F.log_softmax(out)
+        return log_probs, clas_log_probs
+
+
+
+
+
+def train_node2vec(EMBEDDING_SIZE, CONTEXT_SIZE, NODE_SIZE, Random_path):
+	losses = []
+	loss_function = nn.NLLLoss()
+	model = Node2Vec(NODE_SIZE, CONTEXT_SIZE, EMBEDDING_SIZE)
+	optimizer = optim.SGD(model.parameters(), lr=0.001)
+	for epoch in range(10):
+		total_loss = torch.Tensor([0])
+		for context, target in Random_path:
+			context_var = autograd.Variable(torch.LongTensor(context))
+			model.zero_grad()
+			log_probs, clas_log_probs = model(context_var)
+			loss1 = loss_function(log_probs, autograd.Variable(torch.LongTensor(target)))
+			loss2 = loss_function(clas_log_probs, autograd.Variable(torch.LongTensor(target_class)))
+			loss = loss1 + loss2
+			loss.backward()
+
+
+
+
+
+
 
 def main(args):
 	'''
