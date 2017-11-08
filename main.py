@@ -19,6 +19,8 @@ import torch.autograd as autograd
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import pickle
+import os
 
 # def parse_args():
 #     '''
@@ -68,21 +70,74 @@ import torch.optim as optim
 # 
 #     return parser.parse_args()
 
-def read_graph():
-    '''
-    Reads the input network in networkx.
-    '''
-    if args.weighted:
-        G = nx.read_edgelist(args.input, nodetype=int, data=(('weight',float),), create_using=nx.DiGraph())
-    else:
-        G = nx.read_edgelist(args.input, nodetype=int, create_using=nx.DiGraph())
-        for edge in G.edges():
-            G[edge[0]][edge[1]]['weight'] = 1
+# def read_graph():
+#     '''
+#     Reads the input network in networkx.
+#     '''
+#     if args.weighted:
+#         G = nx.read_edgelist(args.input, nodetype=int, data=(('weight',float),), create_using=nx.DiGraph())
+#     else:
+#         G = nx.read_edgelist(args.input, nodetype=int, create_using=nx.DiGraph())
+#         for edge in G.edges():
+#             G[edge[0]][edge[1]]['weight'] = 1
+#
+#     if not args.directed:
+#         G = G.to_undirected()
+#
+#     return G
 
-    if not args.directed:
-        G = G.to_undirected()
+def read_graph(conf_file, author_file, paper_file, paper_conf_file, paper_author_file):
+    i = 0
+    G = nx.Graph()
+    confid_map_node = dict()
+    authorid_map_node = dict()
+    paperid_map_node = dict()
+    with open(conf_file) as f:
+        line = f.readline()
+        while line != '':
+            line = line.strip().split()
+            G.add_node(i, type = 'C', name = line[1])
+            confid_map_node[int(line[0])] = i
+            line = f.readline()
+            i = i + 1
+    with open(author_file) as f:
+        line = f.readline()
+        while line != '':
+            line = line.strip().split()
+            G.add_node(i, type = 'A', name = line[1])
+            authorid_map_node[int(line[0])] = i
+            line = f.readline()
+            i = i + 1
+    with open(paper_file) as f:
+        line = f.readline()
+        while line != '':
+            line = line.strip().split()
+            G.add_node(i, type = 'P', name= ' '.join(line[1:]))
+            print line
+            paperid_map_node[int(line[0])] = i
+            line = f.readline()
+            i = i + 1
+    with open(paper_conf_file) as f:
+        line = f.readline()
+        while line != '':
+            line = line.strip().split()
+            G.add_edge(paperid_map_node[int(line[0])], confid_map_node[int(line[1])])
+            line = f.readline()
+    with open(paper_author_file) as f:
+        line = f.readline()
+        while line != '':
+            line = line.strip().split()
+            G.add_edge(paperid_map_node[int(line[0])], authorid_map_node[int(line[1])])
+            line = f.readline()
+    for edge in G.edges:
+        G[edge[0]][edge[1]]['weight'] = 1
+    return (confid_map_node, authorid_map_node, paperid_map_node, G)
 
-    return G
+
+
+
+
+
 
 def learn_embeddings(walks):
     '''
@@ -97,14 +152,14 @@ class Node2Vec(nn.Module):
     def __init__(self, NODE_SIZE, CONTEXT_SIZE, EMBEDDING_SIZE):
         super(Node2Vec, self).__init__()
         self.embeddings = nn.Embedding(NODE_SIZE, EMBEDDING_SIZE)
-        self.linear1 = nn.Linear(CONTEXT_SIZE * EMBEDDING_SIZE, 128)
+        self.linear1 = nn.Linear(2 * CONTEXT_SIZE * EMBEDDING_SIZE, 128)
         self.linear2 = nn.Linear(128, NODE_SIZE)
         self.classif1 = nn.Linear(EMBEDDING_SIZE, 64)
         self.classif2 = nn.Linear(64, 1)
 
     def forward(self, inputs):
-        embeds = self.embeddings(inputs[:-1]).view((1, -1))
-        clas_embed = self.embeddings(inputs[-1]).view((1,-1))
+        embeds = self.embeddings(inputs).view((1, -1))
+        clas_embed = self.embeddings(inputs[-1]).view((1, -1))
         out = F.relu(self.linear1(embeds))
         out = self.linear2(out)
         log_probs = F.log_softmax(out)
@@ -117,15 +172,20 @@ class Node2Vec(nn.Module):
 
 
 
-def train_node2vec(EMBEDDING_SIZE, CONTEXT_SIZE, NODE_SIZE, Random_path, node_map_type):
+def train_node2vec(EMBEDDING_SIZE, CONTEXT_SIZE, NODE_SIZE, random_paths, node_map_type):
     # losses = []
     loss_function = nn.NLLLoss()
     model = Node2Vec(NODE_SIZE, CONTEXT_SIZE, EMBEDDING_SIZE)
     optimizer = optim.SGD(model.parameters(), lr=0.001)
+    train_grams = []
+    for random_path in random_paths:
+        train_grams = train_grams + [ (random_path[i-CONTEXT_SIZE:i] + random_path[i+1: i+CONTEXT_SIZE+1], random_path[i]) for i in range(CONTEXT_SIZE, len(random_path) - CONTEXT_SIZE)]
+    print train_grams[:3]
     for epoch in range(10):
         total_loss = torch.Tensor([0])
-        for context, target in Random_path:
+        for context, target in train_grams:
             target_class = node_map_type[context[-1]]
+            # target_class = node_map_type[target]
             context_var = autograd.Variable(torch.LongTensor(context))
             model.zero_grad()
             log_probs, clas_log_probs = model(context_var)
@@ -134,30 +194,42 @@ def train_node2vec(EMBEDDING_SIZE, CONTEXT_SIZE, NODE_SIZE, Random_path, node_ma
             loss = loss1 + loss2
             loss.backward()
             optimizer.step()
-
             total_loss += loss.data
-        print(total_loss)
+        print total_loss
 
 
 
 
 def get_node_map_type(G):
     node_map_type = dict()
-    for node in G.nodes:
-        node_map_type[node] = G.nodes[node][type]
+    for node in list(G.nodes):
+        node_map_type[node] = G.nodes[node]['type']
     return node_map_type
 
 if __name__ == '__main__':
-    nx_G = read_graph()
+    # nx_G = read_graph()
+    if not os._exists('graph_dict.pkl'):
+        conf_file = 't_id_conf.txt'
+        author_file = 't_id_author.txt'
+        paper_file = 't_id_paper.txt'
+        paper_conf_file = 't_paper_conf.txt'
+        paper_author_file = 't_paper_author.txt'
+        (confid_map_node, authorid_map_node, paperid_map_node, nx_G) = read_graph(conf_file, author_file, paper_file, paper_conf_file, paper_author_file)
+        graph_dict = (confid_map_node, authorid_map_node, paperid_map_node, nx_G)
+        with open('graph_dict.pkl', 'w') as f:
+            pickle.dump(graph_dict, f)
+    else:
+        with open('graph_dict.pkl') as f:
+            (confid_map_node, authorid_map_node, paperid_map_node, nx_G) = pickle.load(f)
     G = node2vec.Graph(nx_G, is_directed=False, p=1, q=1)
     G.preprocess_transition_probs()
-    num_walks = 100000
+    num_walks = 10
     walk_length = 1000
     walks = G.simulate_walks(num_walks, walk_length)
-    node_map_type = get_node_map_type(G)
-    EMBEDDING_SIZE = 300
+    node_map_type = get_node_map_type(G.G)
+    EMBEDDING_SIZE = 30
     CONTEXT_SIZE = 4
-    NODE_SIZE = len(G.nodes)
+    NODE_SIZE = len(G.G.nodes)
     train_node2vec(EMBEDDING_SIZE, CONTEXT_SIZE, NODE_SIZE, walks, node_map_type)
 
 # def main(args):

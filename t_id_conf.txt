@@ -1,0 +1,9 @@
+1	vICTSS
+2	vIJIMAI
+3	vComputationalIntelligence
+4	vIJTHI
+5	vComputerMethodsandProgramsinBiomedicine
+6	vComp.inBio.andMed.
+7	vDSV-IS
+8	vArchiveofFormalProofs
+9	vOOPSLA
