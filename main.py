@@ -129,7 +129,7 @@ def read_graph(conf_file, author_file, paper_file, paper_conf_file, paper_author
             line = line.strip().split()
             G.add_edge(paperid_map_node[int(line[0])], authorid_map_node[int(line[1])])
             line = f.readline()
-    for edge in G.edges:
+    for edge in G.edges():
         G[edge[0]][edge[1]]['weight'] = 1
     return (confid_map_node, authorid_map_node, paperid_map_node, G)
 
@@ -202,8 +202,8 @@ def train_node2vec(EMBEDDING_SIZE, CONTEXT_SIZE, NODE_SIZE, random_paths, node_m
 
 def get_node_map_type(G):
     node_map_type = dict()
-    for node in list(G.nodes):
-        node_map_type[node] = G.nodes[node]['type']
+    for node in list(G.nodes()):
+        node_map_type[node] = G.node[node]['type']
     return node_map_type
 
 if __name__ == '__main__':
@@ -229,7 +229,7 @@ if __name__ == '__main__':
     node_map_type = get_node_map_type(G.G)
     EMBEDDING_SIZE = 30
     CONTEXT_SIZE = 4
-    NODE_SIZE = len(G.G.nodes)
+    NODE_SIZE = len(G.G.nodes())
     train_node2vec(EMBEDDING_SIZE, CONTEXT_SIZE, NODE_SIZE, walks, node_map_type)
 
 # def main(args):
